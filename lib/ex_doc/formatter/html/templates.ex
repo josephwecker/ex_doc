@@ -1,49 +1,74 @@
 defmodule ExDoc.Formatter.HTML.Templates do
-  @moduledoc """
-  Handle all template interfaces for the HTML formatter.
-  """
-
+  @moduledoc false
   require EEx
 
   @doc """
   Generate content from the module template for a given `node`
   """
-  def module_page(node, modules, exceptions, protocols, config) do
-    types = group_types(node)
-    module_template(config, node, types.types, types.functions, types.macros, types.callbacks,
-                    modules, exceptions, protocols)
+  def module_page(module_node, nodes_map, config) do
+    summary_map = group_summary(module_node)
+    module_template(config, module_node, summary_map, nodes_map)
   end
 
-  # Get the full specs from a function, already in HTML form.
-  defp get_specs(%ExDoc.FunctionNode{specs: specs}) when is_list(specs) do
+  @doc """
+  Get the full specs from a function, already in HTML form.
+  """
+  def get_specs(%ExDoc.TypeNode{spec: spec}) do
+    [spec]
+  end
+  def get_specs(%ExDoc.FunctionNode{specs: specs}) when is_list(specs) do
     presence specs
   end
+  def get_specs(_node) do
+    nil
+  end
 
-  defp get_specs(_node), do: nil
+  @doc """
+  Get defaults clauses.
+  """
+  def get_defaults(%{defaults: defaults}) do
+    defaults
+  end
+  def get_defaults(_) do
+    []
+  end
 
-  # Convert markdown to HTML.
-  defp to_html(nil), do: nil
-  defp to_html(bin) when is_binary(bin), do: ExDoc.Markdown.to_html(bin)
+  @doc """
+  Converts markdown to HTML using the given node file+line.
+  """
+  def to_html(nil, %{source_path: _, doc_line: _}) do
+    nil
+  end
+  def to_html(doc, %{source_path: file, doc_line: line}) when is_binary(doc) do
+    ExDoc.Markdown.to_html(doc, file: file, line: line + 1)
+  end
 
-  # Get the pretty name of a function node
-  defp pretty_type(%ExDoc.FunctionNode{type: t}) do
+  @doc """
+  Get the pretty name of a function node
+  """
+  def pretty_type(%ExDoc.TypeNode{type: t}) do
+    Atom.to_string(t)
+  end
+  def pretty_type(%ExDoc.FunctionNode{type: t}) do
     case t do
       :def           -> "function"
       :defmacro      -> "macro"
       :callback      -> "callback"
       :macrocallback -> "macro callback"
-      :type          -> "type"
     end
   end
 
-  # Generate a link id
-  defp link_id(node), do: link_id(node.id, node.type)
-  defp link_id(id, type) do
+  @doc """
+  Generate a link id
+  """
+  def link_id(module_node), do: link_id(module_node.id, module_node.type)
+  def link_id(id, type) do
     case type do
       :macrocallback -> "c:#{id}"
       :callback      -> "c:#{id}"
-      :type             -> "t:#{id}"
-      _                 -> "#{id}"
+      :type          -> "t:#{id}"
+      :opaque        -> "t:#{id}"
+      _              -> "#{id}"
     end
   end
 
@@ -88,19 +113,16 @@ defmodule ExDoc.Formatter.HTML.Templates do
   @doc """
   Create a JS object which holds all the items displayed in the sidebar area
   """
-  @spec create_sidebar_items(list) :: String.t
-  def create_sidebar_items(input) do
-    object =
-      input
-      |> Enum.into([], &sidebar_items_keys/1)
-      |> Enum.join(",")
-    "sidebarNodes={#{object}}"
+  def create_sidebar_items(nodes_map, extras) do
+    nodes_map =
+      [sidebar_items_extras(extras) | Enum.map(nodes_map, &sidebar_items_keys/1)]
+    "sidebarNodes={#{Enum.join(nodes_map, ",")}}"
   end
 
-  defp sidebar_items_keys({:extras, value}) do
+  defp sidebar_items_extras(extras) do
     keys =
-      value
-      |> Enum.into([], &sidebar_items_extra/1)
+      extras
+      |> Enum.map(&sidebar_items_extra/1)
       |> Enum.join(",")
     ~s/"extras":[#{keys}]/
   end
@@ -108,28 +130,38 @@ defmodule ExDoc.Formatter.HTML.Templates do
   defp sidebar_items_keys({id, value}) do
     keys =
       value
-      |> Enum.into([], &sidebar_items_node/1)
+      |> Enum.map(&sidebar_items_node/1)
       |> Enum.join(",")
     ~s/"#{id}":[#{keys}]/
   end
 
-  defp sidebar_items_extra({id, title, headers}) do
-    headers = Enum.map_join(headers, ",", fn {header, anchor} ->
-      sidebar_items_object(header, anchor)
-    end)
-    ~s/{"id":"#{id}","title":"#{title}","headers":[#{headers}]}/
+  defp sidebar_items_extra(%{id: id, title: title, group: group, content: content}) do
+    headers =
+      content
+      |> extract_headers
+      |> Enum.map_join(",", fn {header, anchor} -> sidebar_items_object(header, anchor) end)
+    ~s/{"id":"#{id}","title":"#{title}","group":"#{group}","headers":[#{headers}]}/
   end
 
-  defp sidebar_items_node(node) do
-    if Enum.empty?(node.docs) do
-      ~s/{"id":"#{node.id}","title":"#{node.id}"}/
+  @h2_regex  ~r/<h2.*?>(.+)<\/h2>/m
+  defp extract_headers(content) do
+    @h2_regex
+    |> Regex.scan(content, capture: :all_but_first)
+    |> List.flatten()
+    |> Enum.map(&{&1, header_to_id(&1)})
+  end
+
+  defp sidebar_items_node(module_node) do
+    items =
+      module_node
+      |> group_summary()
+      |> Enum.reject(fn {_type, nodes_map} -> nodes_map == [] end)
+      |> Enum.map_join(",", &sidebar_items_by_type/1)
+
+    if items == "" do
+      ~s/{"id":"#{module_node.id}","title":"#{module_node.id}"}/
     else
-      types =
-        node
-        |> group_types()
-        |> Enum.reject(fn {_type, entries} -> entries == [] end)
-        |> Enum.map_join(",", &sidebar_items_by_type/1)
-      ~s/{"id":"#{node.id}","title":"#{node.id}",#{types}}/
+      ~s/{"id":"#{module_node.id}","title":"#{module_node.id}",#{items}}/
     end
   end
 
@@ -144,11 +176,11 @@ defmodule ExDoc.Formatter.HTML.Templates do
     ~s/{"id":"#{id}","anchor":"#{URI.encode(anchor)}"}/
   end
 
-  defp group_types(node) do
-    %{types: node.typespecs,
-      functions: Enum.filter(node.docs, & &1.type in [:def]),
-      macros: Enum.filter(node.docs, & &1.type in [:defmacro]),
-      callbacks: Enum.filter(node.docs, & &1.type in [:callback, :macrocallback])}
+  def group_summary(module_node) do
+    %{types: module_node.typespecs,
+      functions: Enum.filter(module_node.docs, & &1.type in [:def]),
+      macros: Enum.filter(module_node.docs, & &1.type in [:defmacro]),
+      callbacks: Enum.filter(module_node.docs, & &1.type in [:callback, :macrocallback])}
   end
 
   defp logo_path(%{logo: nil}), do: nil
@@ -160,38 +192,80 @@ defmodule ExDoc.Formatter.HTML.Templates do
   defp sidebar_type(:module), do: "modules"
   defp sidebar_type(:behaviour), do: "modules"
 
-  defp asset_rev(output, pattern) do
-    output =
-      output
-      |> Path.expand()
+  def asset_rev(output, pattern) do
+    output = Path.expand(output)
 
     output
     |> Path.join(pattern)
     |> Path.wildcard()
-    |> relative_asset(output)
+    |> relative_asset(output, pattern)
   end
 
-  defp relative_asset([], _), do: nil
-  defp relative_asset([h|_], output), do: Path.relative_to(h, output)
+  defp relative_asset([], output, pattern), do: raise "could not find matching #{output}/#{pattern}"
+  defp relative_asset([h|_], output, _pattern), do: Path.relative_to(h, output)
+
+  @doc """
+  Extract a linkable ID from a heading
+  """
+  @spec header_to_id(String.t) :: String.t
+  def header_to_id(header) do
+    header
+    |> String.replace(~r/<.+>/, "")
+    |> String.replace(~r/&#\d+;/, "")
+    |> String.replace(~r/&[A-Za-z0-9]+;/, "")
+    |> String.replace(~r/\W+/u, "-")
+    |> String.strip(?-)
+    |> String.downcase()
+  end
+
+  @doc """
+  Link secondary headings found with `regex` with in the given `content`.
+  IDs are prefixed with `prefix`.
+  """
+  @h2_regex ~r/<h2.*?>(.+)<\/h2>/m
+  @spec link_headings(String.t, Regex.t, String.t) :: String.t
+  def link_headings(content, regex \\ @h2_regex, prefix \\ "")
+  def link_headings(nil, _, _), do: nil
+  def link_headings(content, regex, prefix) do
+    Regex.replace(regex, content, fn match, title ->
+      link_heading(match, title, header_to_id(title), prefix)
+    end)
+  end
+
+  defp link_heading(match, _title, "", _prefix), do: match
+  defp link_heading(_match, title, id, prefix) do
+    """
+    <h2 id="#{prefix}#{id}" class="section-heading">
+      <a href="##{prefix}#{id}" class="hover-link"><i class="icon-link"></i></a>
+      #{title}
+    </h2>
+    """
+  end
+
+  defp link_moduledoc_headings(content) do
+    link_headings(content, @h2_regex, "module-")
+  end
+
+  defp link_detail_headings(content, prefix) do
+    link_headings(content, @h2_regex, prefix <> "-")
+  end
 
   templates = [
-    detail_template: [:node, :_module],
+    detail_template: [:module_node, :_module],
     footer_template: [:config],
     head_template: [:config, :page],
-    module_template: [:config, :module, :types, :functions, :macros, :callbacks,
-                      :modules, :exceptions, :protocols],
-    not_found_template: [:config, :modules, :exceptions, :protocols],
-    api_reference_entry_template: [:node],
-    api_reference_template: [:config, :modules, :exceptions, :protocols],
-    extra_template: [:config, :title, :modules, :exceptions, :protocols, :content],
-    sidebar_template: [:config, :modules, :exceptions, :protocols],
+    module_template: [:config, :module, :summary_map, :nodes_map],
+    not_found_template: [:config, :nodes_map],
+    api_reference_entry_template: [:module_node],
+    api_reference_template: [:config, :nodes_map],
+    extra_template: [:config, :title, :nodes_map, :content],
+    sidebar_template: [:config, :nodes_map],
     summary_template: [:name, :nodes],
-    summary_item_template: [:node],
-    type_detail_template: [:node, :_module],
+    summary_item_template: [:module_node],
     redirect_template: [:config, :redirect_to],
   ]
 
-  Enum.each templates, fn({ name, args }) ->
+  Enum.each templates, fn({name, args}) ->
     filename = Path.expand("templates/#{name}.eex", __DIR__)
     @doc false
     EEx.function_from_file :def, name, filename, args

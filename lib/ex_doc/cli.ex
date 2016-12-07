@@ -4,29 +4,29 @@ defmodule ExDoc.CLI do
   """
 
   @doc """
-  Handle the command line parsing and trigger all the required mechanism to
-  transform the MarkDown documents into a specified format (default: HTML)
+  Handles the command line parsing and triggers the required mechanism to
+  transform the Markdown documents into a specified format (default is HTML).
   """
-  def run(args, generator \\ &ExDoc.generate_docs/3) do
+  def main(args, generator \\ &ExDoc.generate_docs/3) do
     {opts, args, _} = OptionParser.parse(args,
                aliases: [o: :output, f: :formatter, c: :config, r: :source_root,
                          u: :source_url, m: :main, p: :homepage_url, l: :logo,
-                         e: :extra, v: :version, a: :canonical],
+                         e: :extra, v: :version, n: :canonical, s: :extra_section,
+                         a: :assets, i: :filter_prefix],
                switches: [extra: :keep])
 
-    cond do
-      List.keymember?(opts, :version, 0) ->
-        do_version
-      true ->
-        do_generate(args, opts, generator)
+    if List.keymember?(opts, :version, 0) do
+      print_version()
+    else
+      generate(args, opts, generator)
     end
   end
 
-  defp do_version do
+  defp print_version do
     IO.puts "ExDoc v#{ExDoc.version}"
   end
 
-  defp do_generate(args, opts, generator) do
+  defp generate(args, opts, generator) do
     [project, version, source_beam] = parse_args(args)
 
     Code.prepend_path(source_beam)
@@ -102,21 +102,23 @@ defmodule ExDoc.CLI do
       BEAMS               Path to compiled beam files
       -c, --config        Give configuration through a file instead of command line
       -o, --output        Path to output docs, default: "doc"
-      -f, --formatter     Docs formatter to use, default: "html"
-      -a, --canonical     Indicate the preferred URL with rel="canonical" link element, default: nil
+      -f, --formatter     Docs formatter to use (html or epub), default: "html"
+      -i, --filter-prefix Include only modules that match the given prefix in
+                          the generated documentation.
       -r, --source-root   Path to the source code root, default: "."
       -u, --source-url    URL to the source code
           --source-ref    Branch/commit/tag used for source link inference, default: "master"
-      -m, --main          The main, entry-point module in docs,
-                          default: "api-reference" when --formatter is "html"
+      -m, --main          The entry-point page in docs, default: "api-reference"
       -p, --homepage-url  URL to link to for the site name
-          --extra-section Allow user to define the title for the additional Markdown files,
-                          default: "PAGES"
       -e, --extra         Allow users to include additional Markdown files
                           May be given multiple times
+      -s, --extra-section Allow user to define the title for the additional Markdown files,
+                          default: "PAGES"
+      -a, --assets        Path to a directory that will be copied as is to the "assets"
+                          directory in the output path
       -l, --logo          Path to the image logo of the project (only PNG or JPEG accepted)
-                          The image size will be 64x64 when --formatter is "html"
-                          default: `nil`
+                          The image size will be 64x64 and copied to the assets directory
+      -n, --canonical     Indicate the preferred URL with rel="canonical" link element
       -v, --version       Print ExDoc version
 
     ## Source linking

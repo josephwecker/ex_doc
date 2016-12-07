@@ -8,7 +8,7 @@
 
 import $ from 'jquery'
 import * as helpers from './helpers'
-
+import {closeSidebar, breakpoint} from './sidebar'
 import resultsTemplate from './templates/search-results.handlebars'
 
 // Local Variables
@@ -16,6 +16,7 @@ import resultsTemplate from './templates/search-results.handlebars'
 
 const $content = $('.content-inner')
 const $input = $('.sidebar-search input')
+const $sidebarItems = $('#full-list li')
 
 // Local Methods
 // -------------
@@ -110,9 +111,12 @@ function search (nodes, value) {
     empty: levels.length === 0
   }))
 
-  var $oldContent = $content.find('*')
+  var $oldContent = $content.children()
   $oldContent.hide()
   $content.append($results)
+
+  // Auto-hide Menu if on Mobile device
+  window.screen.width < breakpoint ? closeSidebar() : null
 
   function closeResults (e) {
     var event = e || window.event
@@ -131,7 +135,7 @@ function search (nodes, value) {
     e.preventDefault()
   })
 
-  $results.find('a').on('click', closeResults)
+  $.merge($results.find('a'), $sidebarItems).on('click', closeResults)
 
   $results.fadeIn(function () {
     // Scroll the container with all elements

@@ -17,7 +17,7 @@ defmodule ExDoc.Markdown.Pandoc do
     * `:header_level` - base header level, outputs to 1
 
   """
-  def to_html(text, opts \\ []) when is_binary(text) do
+  def to_html(text, opts) when is_binary(text) do
     text
     |> text_to_file()
     |> open_port(opts)
@@ -28,7 +28,7 @@ defmodule ExDoc.Markdown.Pandoc do
   defp text_to_file(text) do
     id =
       4
-      |> :crypto.rand_bytes()
+      |> :crypto.strong_rand_bytes()
       |> Base.encode16()
     unique_name = "tmpdoc_#{id}.md"
     tmp_path = Path.join(System.tmp_dir, unique_name)

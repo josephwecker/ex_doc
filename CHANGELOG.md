@@ -1,5 +1,101 @@
 # Changelog
 
+## v0.14.5
+
+  * Enhancements
+    * Allow ExDoc to work as an escript
+
+## v0.14.4
+
+  * Enhancements
+    * Point to Elixir docs on hexdocs.pm
+    * Many improvements to layout and styling of EPUB formatter
+    * Support multiple formatters to be configured on `mix.exs`
+    * Also digest `sidebar_items.js`
+    * Force parentheses on type signature to remove ambiguity
+    * Generate top-level docs for an umbrella project
+    * Searching on mobile closes menu when the Enter key is hit
+
+## v0.14.3
+
+  * Enhancements
+    * Support the `:assets` option that automatically copies all entries in the given directory to `doc/assets`
+    * Remove numbering on Extras subheaders from sidebar
+    * Pass file and line information to markdown formatters for better warnings
+    * Allow extra pages to be grouped together under a given heading
+    * Generate ids for default name/arity pairs so they can be linked (both remotely and locally)
+
+  * Bug fixes
+    * Fix autolink for functions containing `%`, `{`, `}` or uppercase characters in the name
+
+## v0.14.2
+
+  * Enhancements
+    * Automatically generate documentations links to any of your dependencies (by default links to hexdocs.pm but allows the URL to be configured)
+    * Allow documentation to be generated to Erlang modules
+
+  * Bug fixes
+    * Make sure "Top" is not included twice on pages
+
+## v0.14.1
+
+  * Bug fixes
+    * Include "Top" link in pages with no headings
+    * Include "Top" link in modules with no docs
+
+## v0.14.0
+
+  * Enhancements
+    * Add support for the epub formatter
+    * Support extraction from `<h2>` headers out of the settext format
+
+  * Layout changes
+    * Indent documentation inside the function/macro/type/callback header
+    * Style types the same way as function/macro/callback and include a link to the source
+    * Increase font-sizes in the sidebar and code snippets
+    * Move the specs definition inside the function/macro/type/callback header and make better use of vertical space
+    * Use a gradient on the sidebar to avoid sudden cut-off when scrolling the modules list
+    * Fix the use of the back-button in some browsers
+    * Allow the whole sidebar to be navigated without moving away from the current page. Expand (+) and collapse (-) buttons have been added to aid exploration
+    * Numerically order pages/guides headers
+
+## v0.13.2
+
+  * Bug fixes
+    * Avoid scrollbar from appearing on all code snippets
+
+## v0.13.1
+
+  * Enhancements
+    * Autolink Elixir's stdlib modules and functions
+    * Show callbacks in search results
+    * Reduce size taken by font-sizes
+    * Increase size for headings in the moduledoc
+
+  * Bug fixes
+    * Fix opened sidebar on small screens
+    * Allow horizontal scrolling for code snippets on small screens
+
+## v0.13.0
+
+  * Bug fixes
+    * Fix issue where docs would fail when being built on Erlang 19
+    * Store templates in `priv` rather than in `lib`
+
+  * Backwards incompatible changes
+    * Require Elixir ~> v1.2
+
+## v0.12.0
+
+  * Enhancements
+    * Remove warnings when running on Elixir v1.3
+    * Support for `@optional_callbacks`
+    * Improve styling for nested lists
+    * Include earmark as a default dependency
+
+  * Bug fixes
+    * Fix many styling and performance front-end related bugs
+
 ## v0.11.5
 
   * Enhancements

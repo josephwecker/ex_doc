@@ -1,76 +1,83 @@
 defmodule ExDoc.Formatter.HTML.Autolink do
-  import ExDoc.Formatter.HTML.Templates, only: [h: 1, enc_h: 1]
   @moduledoc """
   Conveniences for autolinking locals, types and more.
   """
 
-  @elixir_docs "http://elixir-lang.org/docs/stable/"
+  import ExDoc.Formatter.HTML.Templates, only: [h: 1, enc_h: 1]
+
+  @elixir_docs "https://hexdocs.pm/"
   @erlang_docs "http://www.erlang.org/doc/man/"
 
   @doc """
   Receives a list of module nodes and autolink all docs and typespecs.
   """
-  def all(modules) do
+  def all(modules, extension, extra_lib_dirs) do
     aliases = Enum.map modules, &(&1.module)
+    lib_dirs = extra_lib_dirs ++ elixir_lib_dirs()
     modules
-    |> Enum.map(&Task.async(fn -> process_module(&1, modules, aliases) end))
+    |> Enum.map(&Task.async(fn -> process_module(&1, modules, aliases, extension, lib_dirs) end))
     |> Enum.map(&Task.await(&1, :infinity))
   end
 
-  defp process_module(module, modules, aliases) do
+  defp process_module(module, modules, aliases, extension, lib_dirs) do
     module
-    |> all_docs(modules)
-    |> all_typespecs(aliases)
+    |> all_docs(modules, extension, lib_dirs)
+    |> all_typespecs(aliases, lib_dirs)
   end
 
   defp module_to_string(module) do
     inspect module.module
   end
 
-  defp all_docs(module, modules) do
-    locals = Enum.map module.docs, &(doc_prefix(&1) <> &1.id)
+  defp all_docs(module, modules, extension, lib_dirs) do
+    locals =
+      for doc <- module.docs,
+          prefix = doc_prefix(doc),
+          entry <- [doc.id | doc.defaults],
+          do: prefix <> entry,
+          into: Enum.map(module.typespecs, &("t:" <> &1.id))
 
     moduledoc =
-      if module.moduledoc do
-        module.moduledoc
+      if module.doc do
+        module.doc
         |> local_doc(locals)
-        |> project_doc(modules, module.id)
+        |> project_doc(modules, module.id, extension, lib_dirs)
       end
 
-    docs = for node <- module.docs do
+    docs = for module_node <- module.docs do
       doc =
-        if node.doc do
-          node.doc
+        if module_node.doc do
+          module_node.doc
           |> local_doc(locals)
-          |> project_doc(modules, module.id)
+          |> project_doc(modules, module.id, extension, lib_dirs)
         end
-      %{node | doc: doc}
+      %{module_node | doc: doc}
     end
 
-    typedocs = for node <- module.typespecs do
+    typedocs = for module_node <- module.typespecs do
       doc =
-        if node.doc do
-          node.doc
+        if module_node.doc do
+          module_node.doc
           |> local_doc(locals)
-          |> project_doc(modules, module.id)
+          |> project_doc(modules, module.id, extension, lib_dirs)
         end
-      %{node | doc: doc}
+      %{module_node | doc: doc}
     end
 
-    %{module | moduledoc: moduledoc, docs: docs, typespecs: typedocs}
+    %{module | doc: moduledoc, docs: docs, typespecs: typedocs}
   end
 
-  defp all_typespecs(module, aliases) do
+  defp all_typespecs(module, aliases, lib_dirs) do
     locals = Enum.map module.typespecs, fn
-      %ExDoc.TypeNode{name: name, arity: arity} -> { name, arity }
+      %ExDoc.TypeNode{name: name, arity: arity} -> {name, arity}
     end
 
     typespecs = for typespec <- module.typespecs do
-      %{typespec | spec: typespec(typespec.spec, locals, aliases)}
+      %{typespec | spec: typespec(typespec.spec, locals, aliases, lib_dirs)}
     end
 
-    docs = for node <- module.docs do
-      %{node | specs: Enum.map(node.specs, &typespec(&1, locals, aliases))}
+    docs = for module_node <- module.docs do
+      %{module_node | specs: Enum.map(module_node.specs, &typespec(&1, locals, aliases, lib_dirs))}
     end
 
     %{module | typespecs: typespecs, docs: docs}
@@ -80,53 +87,75 @@ defmodule ExDoc.Formatter.HTML.Autolink do
   Converts the given `ast` to string while linking the locals
   given by `typespecs` as HTML.
   """
-  def typespec({:when, _, [{:::, _, [left, {:|, _, _} = center]}, right]} = ast, typespecs, aliases) do
+  def typespec(ast, typespecs, aliases, lib_dirs \\ elixir_lib_dirs())
+
+  def typespec({:when, _, [{:::, _, [left, {:|, _, _} = center]}, right]} = ast, typespecs, aliases, lib_dirs) do
     if short_typespec?(ast) do
-      typespec_to_string(ast, typespecs, aliases)
+      normalize_left(ast, typespecs, aliases, lib_dirs)
     else
-      typespec_to_string(left, typespecs, aliases) <>
-      " ::\n  " <> typespec_with_new_line(center, typespecs, aliases) <>
-      " when " <> String.slice(typespec_to_string(right, typespecs, aliases), 1..-2)
+      normalize_left(left, typespecs, aliases, lib_dirs) <>
+      " ::\n  " <> typespec_with_new_line(center, typespecs, aliases, lib_dirs) <>
+      " when " <> String.slice(typespec_to_string(right, typespecs, aliases, lib_dirs), 1..-2)
     end
   end
 
-  def typespec({:::, _, [left, {:|, _, _} = center]} = ast, typespecs, aliases) do
+  def typespec({:::, _, [left, {:|, _, _} = center]} = ast, typespecs, aliases, lib_dirs) do
     if short_typespec?(ast) do
-      typespec_to_string(ast, typespecs, aliases)
+      normalize_left(ast, typespecs, aliases, lib_dirs)
     else
-      typespec_to_string(left, typespecs, aliases) <>
-      " ::\n  " <> typespec_with_new_line(center, typespecs, aliases)
+      normalize_left(left, typespecs, aliases, lib_dirs) <>
+      " ::\n  " <> typespec_with_new_line(center, typespecs, aliases, lib_dirs)
     end
   end
 
-  def typespec(other, typespecs, aliases) do
-    typespec_to_string(other, typespecs, aliases)
+  def typespec(other, typespecs, aliases, lib_dirs) do
+    normalize_left(other, typespecs, aliases, lib_dirs)
   end
 
-  defp typespec_with_new_line({:|, _, [left, right]}, typespecs, aliases) do
-    typespec_to_string(left, typespecs, aliases) <>
-      " |\n  " <> typespec_with_new_line(right, typespecs, aliases)
+  defp typespec_with_new_line({:|, _, [left, right]}, typespecs, aliases, lib_dirs) do
+    typespec_to_string(left, typespecs, aliases, lib_dirs) <>
+      " |\n  " <> typespec_with_new_line(right, typespecs, aliases, lib_dirs)
   end
 
-  defp typespec_with_new_line(other, typespecs, aliases) do
-    typespec_to_string(other, typespecs, aliases)
+  defp typespec_with_new_line(other, typespecs, aliases, lib_dirs) do
+    typespec_to_string(other, typespecs, aliases, lib_dirs)
   end
 
-  defp typespec_to_string(ast, typespecs, aliases) do
+  defp normalize_left({:::, _, [{name, meta, args}, right]}, typespecs, aliases, lib_dirs) do
+    new_args =
+      Enum.map(args, &[self(), typespec_to_string(&1, typespecs, aliases, lib_dirs)])
+    new_left =
+      Macro.to_string {name, meta, new_args}, fn
+        [pid, string], _ when pid == self() -> string
+        _, string -> string
+      end
+    new_left <> " :: " <> typespec_to_string(right, typespecs, aliases, lib_dirs)
+  end
+
+  defp normalize_left({:when, _, [{:::, _, _} = left, right]}, typespecs, aliases, lib_dirs) do
+    normalize_left(left, typespecs, aliases, lib_dirs) <>
+    " when " <> String.slice(typespec_to_string(right, typespecs, aliases, lib_dirs), 1..-2)
+  end
+
+  defp normalize_left(ast, typespecs, aliases, lib_dirs) do
+    typespec_to_string(ast, typespecs, aliases, lib_dirs)
+  end
+
+  defp typespec_to_string(ast, typespecs, aliases, lib_dirs) do
     Macro.to_string(ast, fn
       {name, _, args}, string when is_atom(name) and is_list(args) ->
         string = strip_parens(string, args)
         arity = length(args)
-        if { name, arity } in typespecs do
+        if {name, arity} in typespecs do
           n = enc_h("#{name}")
           ~s[<a href="#t:#{n}/#{arity}">#{h(string)}</a>]
         else
-         string
+          string
         end
-      {{ :., _, [alias, name] }, _, args}, string when is_atom(name) and is_list(args) ->
+      {{:., _, [alias, name]}, _, args}, string when is_atom(name) and is_list(args) ->
         string = strip_parens(string, args)
         alias = expand_alias(alias)
-        if source = get_source(alias, aliases) do
+        if source = get_source(alias, aliases, lib_dirs) do
           n = enc_h("#{name}")
           ~s[<a href="#{source}#{enc_h(inspect alias)}.html#t:#{n}/#{length(args)}">#{h(string)}</a>]
         else
@@ -138,57 +167,28 @@ defmodule ExDoc.Formatter.HTML.Autolink do
   end
 
   defp short_typespec?(ast) do
-    byte_size(Macro.to_string(ast)) < 60
+    byte_size(Macro.to_string(ast)) <= 70
   end
 
   defp strip_parens(string, []) do
     if :binary.last(string) == ?) do
-      :binary.part(string, 0, byte_size(string)-2)
+      :binary.part(string, 0, byte_size(string) - 2)
     else
       string
     end
   end
-
   defp strip_parens(string, _), do: string
 
   defp expand_alias({:__aliases__, _, [h|t]}) when is_atom(h), do: Module.concat([h|t])
   defp expand_alias(atom) when is_atom(atom), do: atom
   defp expand_alias(_), do: nil
 
-  defp get_source(alias, aliases) do
+  defp get_source(alias, aliases, lib_dirs) do
     cond do
       is_nil(alias) -> nil
       alias in aliases -> ""
-      dir = from_elixir(alias) -> @elixir_docs <> dir <> "/"
+      doc = lib_dirs_to_doc(alias, lib_dirs) -> doc
       true -> nil
-    end
-  end
-
-  defp from_elixir(alias) do
-    alias_ebin = alias_ebin(alias)
-    if String.starts_with?(alias_ebin, elixir_ebin()) do
-      alias_ebin
-      |> Path.dirname()
-      |> Path.dirname()
-      |> Path.basename()
-    end
-  end
-
-  defp alias_ebin(alias) do
-    case :code.where_is_file('#{alias}.beam') do
-      :non_existing -> ""
-      path -> List.to_string(path)
-    end
-  end
-
-  defp elixir_ebin do
-    case :code.where_is_file('Elixir.Kernel.beam') do
-      :non_existing -> [0]
-      path ->
-        path
-        |> Path.dirname()
-        |> Path.dirname()
-        |> Path.dirname()
     end
   end
 
@@ -202,31 +202,44 @@ defmodule ExDoc.Formatter.HTML.Autolink do
   will get translated to the new href of the function.
   """
   def local_doc(bin, locals) when is_binary(bin) do
-    ~r{(?<!\[)`\s*(([a-z\d_!\\?>\\|=&<!~+\\.\\+*^@-]+)/\d+)\s*`(?!\])}
-    |> Regex.scan(bin)
-    |> Enum.uniq()
-    |> List.flatten()
-    |> Enum.filter(&(&1 in locals))
-    |> Enum.reduce(bin, fn (x, acc) ->
-         {prefix, _, function_name, arity} = split_function(x)
-         escaped = Regex.escape(x)
-         Regex.replace(~r/(?<!\[)`(\s*#{escaped}\s*)`(?!\])/, acc,
-           "[`#{function_name}/#{arity}`](##{prefix}#{enc_h function_name}/#{arity})")
-       end)
+    fun_re = ~r{(([ct]:)?([a-z_]+[A-Za-z_\d]*[\\?\\!]?|[\{\}=&\\|\\.<>~*^@\\+\\%\\!-]+)/\d+)} |> Regex.source
+    regex = ~r{(?<!\[)`\s*(#{fun_re})\s*`(?!\])}
+    Regex.replace(regex, bin, fn all, match ->
+      if match in locals do
+        {prefix, _, function, arity} = split_function(match)
+        "[`#{function}/#{arity}`](##{prefix}#{enc_h function}/#{arity})"
+      else
+        all
+      end
+    end)
   end
 
   @doc """
   Creates links to modules and functions defined in the project.
   """
-  def project_doc(bin, modules, module_id \\ nil) when is_binary(bin) do
-    project_funs = for m <- modules, d <- m.docs, do: doc_prefix(d) <> m.id <> "." <> d.id
+  def project_doc(bin, modules, module_id \\ nil,
+                  extension \\ ".html", lib_dirs \\ elixir_lib_dirs()) when is_binary(bin) do
+    project_types =
+      for module <- modules,
+          type <- module.typespecs,
+          do: "t:" <> module.id <> "." <> type.id
+
+    project_docs =
+      for module <- modules,
+          doc <- module.docs,
+          prefix = doc_prefix(doc),
+          entry <- [doc.id | doc.defaults],
+          do: prefix <>  module.id <> "." <> entry,
+          into: project_types
+
     project_modules =
       modules
       |> Enum.map(&module_to_string/1)
       |> Enum.uniq()
+
     bin
-    |> project_functions(project_funs)
-    |> project_modules(project_modules, module_id)
+    |> elixir_functions(project_docs, extension, lib_dirs)
+    |> elixir_modules(project_modules, module_id, extension, lib_dirs)
     |> erlang_functions()
   end
 
@@ -234,61 +247,70 @@ defmodule ExDoc.Formatter.HTML.Autolink do
   defp doc_prefix(%{type: _}), do: ""
 
   @doc """
-  Create links to functions defined in the project, specified in `project_funs`
-  as a list of `Module.fun/arity` tuples.
+  Create links to elixir functions defined in the project and Elixir itself.
+
+  Project functions are specified in `project_funs` as a list of
+  `Module.fun/arity` tuples.
 
   Ignores functions which are already wrapped in markdown url syntax,
   e.g. `[Module.test/1](url)`. If the function doesn't touch the leading
   or trailing `]`, e.g. `[my link Module.link/1 is here](url)`, the Module.fun/arity
   will get translated to the new href of the function.
   """
-  def project_functions(bin, project_funs) when is_binary(bin) do
-    ~r{(?<!\[)`\s*((c:)?(([A-Z][A-Za-z]+)\.)+([a-z_!\?>\|=&<!~+\.\+*^@-]+)/\d+)\s*`(?!\])}
-    |> Regex.scan(bin)
-    |> Enum.uniq()
-    |> List.flatten()
-    |> Enum.filter(&(&1 in project_funs))
-    |> Enum.reduce(bin, fn (x, acc) ->
-         {prefix, mod_str, function_name, arity} = split_function(x)
-         escaped = Regex.escape(x)
-         Regex.replace(~r/(?<!\[)`(\s*#{escaped}\s*)`(?!\])/, acc,
-           "[`#{mod_str}.#{function_name}/#{arity}`](#{mod_str}.html##{prefix}#{enc_h function_name}/#{arity})")
-       end)
+  def elixir_functions(bin, project_funs, extension \\ ".html", lib_dirs \\ elixir_lib_dirs()) when is_binary(bin) do
+    module_re = ~r{(([A-Z][A-Za-z_\d]+)\.)+} |> Regex.source
+    fun_re = ~r{([ct]:)?(#{module_re}([a-z_]+[A-Za-z_\d]*[\\?\\!]?|[\{\}=&\\|\\.<>~*^@\\+\\%\\!-]+)/\d+)} |> Regex.source
+    regex = ~r{(?<!\[)`\s*(#{fun_re})\s*`(?!\])}
+
+    Regex.replace(regex, bin, fn all, match ->
+      {prefix, module, function, arity} = split_function(match)
+
+      cond do
+        match in project_funs ->
+          "[`#{module}.#{function}/#{arity}`](#{module}#{extension}##{prefix}#{enc_h function}/#{arity})"
+        doc = lib_dirs_to_doc("Elixir." <> module, lib_dirs) ->
+          "[`#{module}.#{function}/#{arity}`](#{doc}#{module}.html##{prefix}#{enc_h function}/#{arity})"
+        true ->
+          all
+      end
+    end)
   end
 
   @doc """
-  Create links to modules defined in the project, specified in `modules`
-  as a list.
+  Create links to elixir modules defined in the project and
+  in Elixir itself.
 
   Ignores modules which are already wrapped in markdown url syntax,
   e.g. `[Module](url)`. If the module name doesn't touch the leading
   or trailing `]`, e.g. `[my link Module is here](url)`, the Module
   will get translated to the new href of the module.
   """
-  def project_modules(bin, modules, module_id \\ nil) when is_binary(bin) do
-    ~r{(?<!\[)`\s*(([A-Z][A-Za-z]+\.?)+)\s*`(?!\])}
-    |> Regex.scan(bin)
-    |> Enum.uniq()
-    |> List.flatten()
-    |> Enum.filter(&(&1 in modules))
-    |> Enum.reduce(bin, fn (x, acc) ->
-         escaped = Regex.escape(x)
-         suffix =
-           if module_id && x == module_id do
-             ".html#content"
-           else
-             ".html"
-           end
-         Regex.replace(~r/(?<!\[)`(\s*#{escaped}\s*)`(?!\])/, acc,
-           "[`\\1`](\\1" <> suffix <> ")")
-       end)
+  def elixir_modules(bin, modules, module_id \\ nil,
+                     extension \\ ".html", lib_dirs \\ elixir_lib_dirs()) when is_binary(bin) do
+    regex = ~r{(?<!\[)`\s*(([A-Z][A-Za-z_\d]+\.?)+)\s*`(?!\])}
+
+    Regex.replace(regex, bin, fn all, match ->
+      cond do
+        match == module_id ->
+          "[`#{match}`](#{match}#{extension}#content)"
+        match in modules ->
+          "[`#{match}`](#{match}#{extension})"
+        doc = lib_dirs_to_doc("Elixir." <> match, lib_dirs) ->
+          "[`#{match}`](#{doc}#{match}.html)"
+        true ->
+          all
+      end
+    end)
   end
 
   defp split_function("c:" <> bin) do
-    {"", mod, fun, arity} = split_function(bin)
+    {_, mod, fun, arity} = split_function(bin)
     {"c:", mod, fun, arity}
   end
-
+  defp split_function("t:" <> bin) do
+    {_, mod, fun, arity} = split_function(bin)
+    {"t:", mod, fun, arity}
+  end
   defp split_function(bin) do
     [modules, arity] = String.split(bin, "/")
     {mod, name} =
@@ -312,46 +334,65 @@ defmodule ExDoc.Formatter.HTML.Autolink do
   will get translated to the new href of the function.
   """
   def erlang_functions(bin) when is_binary(bin) do
-    lib_dir = erlang_lib_dir()
-    ~r{(?<!\[)`\s*:([a-z_]+\.[0-9a-zA-Z_!\\?]+/\d+)\s*`(?!\])}
-    |> Regex.scan(bin)
-    |> Enum.uniq()
-    |> List.flatten()
-    |> Enum.filter(&valid_erlang_beam?(&1, lib_dir))
-    |> Enum.filter(&module_exports_function?/1)
-    |> Enum.reduce(bin, fn (x, acc) ->
-         {_, mod_str, function_name, arity} = split_function(x)
-         escaped = Regex.escape(x)
-         Regex.replace(~r/(?<!\[)`(\s*:#{escaped}\s*)`(?!\])/, acc,
-           "[`\\1`](#{@erlang_docs}#{mod_str}.html##{function_name}-#{arity})")
-       end)
+    lib_dirs = erlang_lib_dirs()
+    regex = ~r{(?<!\[)`\s*:([a-z_]+\.[0-9a-zA-Z_!\\?]+/\d+)\s*`(?!\])}
+    Regex.replace(regex, bin, fn all, match ->
+      {_, module, function, arity} = split_function(match)
+      if doc = lib_dirs_to_doc(module, lib_dirs) do
+        "[`:#{match}`](#{doc}#{module}.html##{function}-#{arity})"
+      else
+        all
+      end
+    end)
   end
 
-  defp valid_erlang_beam?(function_str, lib_dir) do
-    { _, mod_str, _function_name, _arity } = split_function(function_str)
-    '#{mod_str}.beam'
-    |> :code.where_is_file
-    |> on_lib_path?(lib_dir)
+  ## Helpers
+
+  defp lib_dirs_to_doc(module, lib_dirs) do
+    case :code.where_is_file('#{module}.beam') do
+      :non_existing ->
+        nil
+      path ->
+        path = List.to_string(path)
+        Enum.find_value(lib_dirs, fn {lib_dir, doc} ->
+          String.starts_with?(path, lib_dir) and doc
+        end)
+    end
   end
 
-  defp on_lib_path?(:non_existing, _base_path), do: false
-  defp on_lib_path?(beam_path, base_path) do
-    beam_path
-    |> Path.expand()
-    |> String.starts_with?(base_path)
+  defp elixir_lib_dirs do
+    case Application.fetch_env(:ex_doc, :elixir_lib_dirs) do
+      {:ok, lib_dirs} ->
+        lib_dirs
+      :error ->
+        lib_dir =
+          case :code.where_is_file('Elixir.Kernel.beam') do
+            :non_existing ->
+              [0]
+            path ->
+              path
+              |> Path.dirname()
+              |> Path.dirname()
+              |> Path.dirname()
+          end
+
+        lib_dirs =
+          for app <- ~w(elixir eex iex logger mix ex_unit) do
+            {lib_dir <> "/" <> app <> "/ebin", @elixir_docs <> app <> "/"}
+          end
+        Application.put_env(:ex_doc, :elixir_lib_dirs, lib_dirs)
+        lib_dirs
+    end
   end
 
-  defp erlang_lib_dir do
-    :code.lib_dir
-    |> Path.expand()
-  end
-
-  defp module_exports_function?(function_str) do
-    {_, mod_str, function_name, arity_str} = split_function(function_str)
-    module = String.to_atom(mod_str)
-    function_name = String.to_atom(function_name)
-    {arity, _} = Integer.parse(arity_str)
-    exports = module.module_info(:exports)
-    Enum.member? exports, {function_name, arity}
+  defp erlang_lib_dirs do
+    case Application.fetch_env(:ex_doc, :erlang_lib_dirs) do
+      {:ok, lib_dirs} ->
+        lib_dirs
+      :error ->
+        lib_dirs = [{Path.expand(:code.lib_dir), @erlang_docs}]
+        Application.put_env(:ex_doc, :erlang_lib_dirs, lib_dirs)
+        lib_dirs
+    end
   end
 end

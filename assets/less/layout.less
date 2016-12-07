@@ -3,10 +3,10 @@ body {
   box-sizing: border-box;
   height: 100%;
   width: 100%;
-  overflow: hidden;
 }
 
 body {
+  background-color: @white;
   font-size: 16px;
   font-family: @sansFontFamily;
   line-height: 1.6875em;
@@ -20,35 +20,132 @@ body {
 
 .main {
   .display(flex);
-  height: 100%;
-  overflow: hidden;
+  justify-content: flex-end;
 }
-
 
 .sidebar {
-  .flex(0, 1, 300px);
+  .display(flex);
   .flex-direction(column);
-  display: none;
+  width: 300px;
   height: 100%;
-  position: absolute;
-  z-index: 999;
-}
-
-body.sidebar-closed .sidebar {
-  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 4;
 }
 
 .content {
-  .flex(1);
+  width: 100%;
+  padding-left: 300px;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   height: 100%;
+  position: relative;
+  z-index: 3;
+}
+
+@media screen and (max-width: 768px) {
+  body {
+    .content {
+      z-index: 0;
+      padding-left: 0;
+    }
+
+    .sidebar {
+      z-index: 3;
+      transform: translateX(-102%);
+      will-change: transform;
+    }
+  }
+}
+
+body.sidebar-opened, body.sidebar-opening {
+  .sidebar-toggle {
+    transform: translateX(250px)
+  }
+
+  @media screen and (max-width: 768px) {
+    .sidebar {
+      transform: translateX(0);
+    }
+  }
+}
+
+body.sidebar-closed, body.sidebar-closing {
+  .sidebar {
+    z-index: 0;
+  }
+
+  .content {
+    padding-left: 0;
+  }
+
+  .sidebar-toggle {
+    transform: none;
+  }
+}
+
+body.sidebar-closed .icon-menu {
+  color: @black;
+}
+
+body.sidebar-opening {
+  .sidebar-toggle {
+    transition: transform 0.3s ease-in-out;
+  }
+
+  .sidebar {
+    z-index: 0;
+  }
+
+  .content {
+    padding-left: 300px;
+    transition: padding-left 0.3s ease-in-out;
+  }
+
+  @media screen and (max-width: 768px) {
+    .content {
+      padding-left: 0;
+    }
+
+    .sidebar {
+      transition: transform 0.3s ease-in-out;
+      z-index: 3;
+    }
+  }
+}
+
+body.sidebar-closing {
+  .sidebar-toggle {
+    transition: transform 0.3s ease-in-out;
+  }
+
+  .content {
+    transition: padding-left 0.3s ease-in-out;
+  }
+
+  @media screen and (max-width: 768px) {
+    .sidebar {
+      z-index: 3;
+      transition: transform 0.3s ease-in-out;
+      transform: translateX(-102%);
+    }
+  }
+}
+
+body.sidebar-closed .sidebar {
+  visibility: hidden;
 }
 
 .content-inner {
   max-width: 949px;
   margin: 0 auto;
   padding: 3px 60px;
+}
+
+.content-outer {
+  background-color: @white;
+  min-height: 100%;
 }
 
 @media screen and (max-width: 768px) {

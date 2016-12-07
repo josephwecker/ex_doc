@@ -6,7 +6,7 @@ h4,
 h5,
 h6 {
   font-family: @sansFontFamily;
-  font-weight: 800;
+  font-weight: 700;
   line-height: 1.5em;
   word-wrap: break-word;
 }
@@ -29,16 +29,15 @@ h1 {
 }
 
 h2 {
-  font-size: 1.625em;
+  font-size: 1.6em;
   margin: 1em 0 .5em;
-  font-weight: 400;
+  font-weight: 700;
 }
 
 h3 {
   font-size: 1.375em;
-  font-weight: 400;
   margin: 1em 0 .5em;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 a {
@@ -54,6 +53,10 @@ ul {
   li {
     line-height: 1.5em;
   }
+
+  li > p {
+    margin: 0;
+  }
 }
 
 
@@ -64,10 +67,18 @@ a.view-source {
   border: none;
   text-shadow: none;
   transition: color 0.3s ease-in-out;
+  margin-top: 1px;
 
   &:hover {
     color: @darkGray;
   }
+}
+
+.note {
+  color: #959595;
+  margin: 0 5px;
+  font-size: 14px;
+  font-weight: normal;
 }
 
 blockquote {
@@ -97,12 +108,12 @@ th {
   text-align: left;
   font-family: @sansFontFamily;
   text-transform: uppercase;
-  font-weight: 600;
+  font-weight: 700;
   padding-bottom: .5em;
 }
 
 tr {
-  border-bottom: 1px solid @lightGray;
+  border-bottom: 1px solid @lightestGray;
   vertical-align: middle;
   height: 2.5em;
 }
@@ -112,7 +123,7 @@ td, th {
   line-height: 2em;
 }
 
-h1.section-heading {
+.section-heading {
   &:hover a.hover-link {
     opacity: 1;
     text-decoration: none;
@@ -131,6 +142,10 @@ h1.section-heading {
     font-size: 16px;
     vertical-align: middle;
   }
+}
+
+.detail h2.section-heading {
+  margin: 1.5em 0 .5em .3em;
 }
 
 .visible-xs {

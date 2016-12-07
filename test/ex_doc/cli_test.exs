@@ -4,7 +4,7 @@ defmodule ExDoc.CLITest do
   import ExUnit.CaptureIO
 
   defp run(args) do
-    ExDoc.CLI.run(args, &{&1, &2, &3})
+    ExDoc.CLI.main(args, &{&1, &2, &3})
   end
 
   test "minimum command-line options" do
@@ -14,7 +14,8 @@ defmodule ExDoc.CLITest do
   test "loading config" do
     File.write!("test.config", ~s([key: "val"]))
 
-    {project, version, opts} = run(["ExDoc", "--extra-section", "Guides", "--extra", "README.md", "1.2.3", "...", "-c", "test.config"])
+    {project, version, opts} =
+      run(["ExDoc", "--extra-section", "Guides", "--extra", "README.md", "1.2.3", "...", "-c", "test.config"])
 
     assert project == "ExDoc"
     assert version == "1.2.3"
@@ -40,11 +41,11 @@ defmodule ExDoc.CLITest do
   end
 
   test "version" do
-    assert capture_io( fn ->
+    assert capture_io(fn ->
       run(["--version"])
     end) == "ExDoc v#{ExDoc.version}\n"
 
-    assert capture_io( fn ->
+    assert capture_io(fn ->
       run(["-v"])
     end) == "ExDoc v#{ExDoc.version}\n"
   end
